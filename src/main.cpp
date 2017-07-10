@@ -88,6 +88,8 @@ int main() {
         string event = j[0].get<string>();
         if (event == "telemetry") {
           // j[1] is the data JSON object
+          
+          // Get the state from the JSON message
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
           double px = j[1]["x"];
@@ -104,9 +106,11 @@ int main() {
           *
           */
           
+          // Create vectors for transformed waypoints
           Eigen::VectorXd transX(ptsx.size());
           Eigen::VectorXd transY(ptsy.size());
           
+          // Transform the waypoints
           for(int i=0; i<ptsx.size(); ++i){
             double xdiff = (ptsx[i] - px);
             double ydiff = (ptsy[i] - py);
@@ -114,54 +118,59 @@ int main() {
             transY[i] = ydiff*cos(psi) - xdiff*sin(psi);
           }
           
-          double xcar = 0; // car's coordinate system
-          double ycar = 0; // car's coordinate system
-          double psicar = 0; //car's coordinate system
+          // State variables in the car's coordinate system
+          double xcar = 0;
+          double ycar = 0;
+          double psicar = 0;
           
+          // Create polynomial to fit the way points
           const int polyOrder = 2;
           auto coeffs = polyfit(transX, transY, polyOrder);
           
-//          double tangent = coeffs[1] + 2*coeffs[2]*px + 3*coeffs[3]*px*px;
+          // tangent vector at x=0 is simiply the first coeffitient
           double tangent = coeffs[1];
           double cte = polyeval(coeffs, xcar) - ycar;
           double epsi = psicar - atan(tangent);
           
+          // Create a vector to store the state
           Eigen::VectorXd state(8);
           state << xcar, ycar, psicar, v, cte, epsi, delta, a;
           
+          // Solve for the optimal actuation instructions
           auto vars = mpc.Solve(state, coeffs);
           
-          double steer_value = vars[6];
-          double throttle_value = vars[7];
-//          throttle_value = 0;
+          // Extract the actuation instructions
+          double steer_value = vars[0];
+          double throttle_value = vars[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = -1.0 * steer_value/deg2rad(30);
+          msgJson["steering_angle"] = -1.0 * steer_value;
           msgJson["throttle"] = throttle_value;
 
-          //Display the MPC predicted trajectory 
+          // Vectors to display the MPC predicted trajectory
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
           
+          // Calculate predicted trajectory with the fitted polynomial
           for(int i=0; i<=50; ++i){
             int x = i*2;
             int y = polyeval(coeffs, x);
             mpc_x_vals.push_back(x);
             mpc_y_vals.push_back(y);
           }
-
+          
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
-          //Display the waypoints/reference line
+          // Vectors to display the ground truth waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
-          
+          // Store waypoints
           for(int i=0; i<ptsx.size(); ++i){
             next_x_vals.push_back(transX[i]);
             next_y_vals.push_back(transY[i]);

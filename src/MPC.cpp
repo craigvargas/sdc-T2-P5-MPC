@@ -27,7 +27,7 @@ double dt = 0.1;
 const double Lf = 2.67;
 
 // Reference velocity
-double ref_v = 30;
+double ref_v = 50;
 
 // Keep track of where each variable starts in the vectors
 size_t x_start = 0;
@@ -80,10 +80,6 @@ class FG_eval {
     // NOTE: In this section you'll setup the model constraints.
     
     // Initial constraints
-    //
-    // We add 1 to each of the starting indices due to cost being located at
-    // index 0 of `fg`.
-    // This bumps up the position of all the other values.
     fg[1 + x_start] = vars[x_start];
     fg[1 + y_start] = vars[y_start];
     fg[1 + psi_start] = vars[psi_start];
@@ -91,7 +87,7 @@ class FG_eval {
     fg[1 + cte_start] = vars[cte_start];
     fg[1 + epsi_start] = vars[epsi_start];
     
-    // The rest of the constraints
+    // The remaining constraints
     for (int t = 1; t < N; t++) {
       // The state at time t+1 .
       AD<double> x1 = vars[x_start + t];
@@ -116,7 +112,7 @@ class FG_eval {
       // **** Look into changing psides for poly > 1 ****
       AD<double> tangent = coeffs[1] + 2*coeffs[2]*x0;// + 3*coeffs[3]*x0*x0;
       AD<double> f0 = coeffs[0] + coeffs[1] * x0 + coeffs[2]*x0*x0;// + coeffs[3]*x0*x0*x0;
-      AD<double> psides0 = CppAD::atan(tangent); // CppAD::atan(coeffs[1]);
+      AD<double> psides0 = CppAD::atan(tangent);
       
       // Here's `x` to get you started.
       // The idea here is to constraint this value to be 0.
@@ -130,10 +126,10 @@ class FG_eval {
       // epsi[t+1] = psi[t] - psides[t] + v[t] * delta[t] / Lf * dt
       fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
       fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
-      fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt); // *** Might need to invert due to simulator controls
+      fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
       fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
       fg[1 + cte_start + t] = cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
-      fg[1 + epsi_start + t] = epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt); // *** Might need to invert due to simulator controls
+      fg[1 + epsi_start + t] = epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
     }
   }
 };
@@ -162,13 +158,13 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   double tLatency = 0.1;  //100 milliseconds
   double xLatency = x + v * CppAD::cos(psi) * tLatency;
   double yLatency = y + v * CppAD::sin(psi) * tLatency;
-  double psiLatency = psi + v * delta / Lf * tLatency; // *** Might need to invert due to simulator controls
+  double psiLatency = psi + v * delta / Lf * tLatency;
   double vLatency = v + a * tLatency;
   double f_x = coeffs[0] + coeffs[1]*xLatency + coeffs[2]*pow(xLatency,2);// + coeffs[3]*pow(xLatency,3);
   double cteLatency = (f_x - yLatency) + (v * CppAD::sin(epsi) * tLatency);
   double tangent = coeffs[1] + 2*coeffs[2]*xLatency;// + 3*coeffs[3]*pow(xLatency,2);
   double psides = atan(tangent);
-  double epsiLatency = (psi - psides) + v * delta / Lf * tLatency; // *** Might need to invert due to simulator controls
+  double epsiLatency = (psi - psides) + v * delta / Lf * tLatency;
   
   cout << "\nval, latent_val:\n";
   cout << "x: " << x << ", " << xLatency << endl;
@@ -195,13 +191,6 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
     vars[i] = 0;
   }
   // Set the initial variable values
-//  vars[x_start] = x;
-//  vars[y_start] = y;
-//  vars[psi_start] = psi;
-//  vars[v_start] = v;
-//  vars[cte_start] = cte;
-//  vars[epsi_start] = epsi;
-  
   vars[x_start] = xLatency;
   vars[y_start] = yLatency;
   vars[psi_start] = psiLatency;
@@ -216,24 +205,21 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // Set all non-actuators upper and lowerlimits
   // to the max negative and positive values.
   for (int i = 0; i < delta_start; i++) {
-    vars_lowerbound[i] = std::numeric_limits<double>::lowest(); // -1.0e19;
-    vars_upperbound[i] = std::numeric_limits<double>::max(); // 1.0e19;
+    vars_lowerbound[i] = std::numeric_limits<double>::lowest();
+    vars_upperbound[i] = std::numeric_limits<double>::max();
   }
   
-  // The upper and lower limits of delta are set to -25 and 25
-  // degrees (values in radians).
-  // NOTE: Feel free to change this to something else.
+  // Set steering limites to 30 degrees in each direction
   const double steeringLimit = 30.0/180*pi();
   for (int i = delta_start; i < a_start; i++) {
-    vars_lowerbound[i] = -steeringLimit; // -0.436332;
-    vars_upperbound[i] = steeringLimit; // 0.436332;
+    vars_lowerbound[i] = -steeringLimit;
+    vars_upperbound[i] = steeringLimit;
   }
   
-  // Acceleration/decceleration upper and lower limits.
-  // NOTE: Feel free to change this to something else.
+  // Acceleration limits
   for (int i = a_start; i < n_vars; i++) {
-    vars_lowerbound[i] = -0.3;
-    vars_upperbound[i] = 0.3;
+    vars_lowerbound[i] = -0.9;
+    vars_upperbound[i] = 0.9;
   }
   
 
@@ -245,14 +231,14 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
     constraints_lowerbound[i] = 0;
     constraints_upperbound[i] = 0;
   }
-  
+  // Initial lowerbound limits
   constraints_lowerbound[x_start] = x;
   constraints_lowerbound[y_start] = y;
   constraints_lowerbound[psi_start] = psi;
   constraints_lowerbound[v_start] = v;
   constraints_lowerbound[cte_start] = cte;
   constraints_lowerbound[epsi_start] = epsi;
-  
+  // Initial upperbound limits
   constraints_upperbound[x_start] = x;
   constraints_upperbound[y_start] = y;
   constraints_upperbound[psi_start] = psi;
@@ -304,8 +290,21 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   
 //  vector<double> retVec;
   
-  return {solution.x[x_start + 1],   solution.x[y_start + 1],
-    solution.x[psi_start + 1], solution.x[v_start + 1],
-    solution.x[cte_start + 1], solution.x[epsi_start + 1],
-    solution.x[delta_start],   solution.x[a_start]};
+  // Set up the return vector
+  int outSize = 2 + 2*N;
+  vector<double> out(outSize);
+  out[0] = solution.x[delta_start]/steeringLimit;
+  out[1] = solution.x[a_start];
+  
+  for(int i=0; i<N; ++i){
+    out[2+2*i] = solution.x[x_start + i];
+    out[2+2*i+1] = solution.x[y_start + i];
+  }
+  
+  return out;
+  
+//  return {solution.x[x_start + 1],   solution.x[y_start + 1],
+//    solution.x[psi_start + 1], solution.x[v_start + 1],
+//    solution.x[cte_start + 1], solution.x[epsi_start + 1],
+//    solution.x[delta_start],   solution.x[a_start]};
 }
